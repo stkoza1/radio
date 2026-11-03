@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>لاسلكي · جدول مهام اليوم</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0d14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+:root{--bg:#0a0d14;--panel:#111724;--card:#182033;--line:#252f47;--ink:#eef1f8;--mut:#8791ab;--gold:#f2b53a;--tx:#ff4d4f;--rx:#2fd49a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:radial-gradient(900px 600px at 40% 0%,#16203a,var(--bg));color:var(--ink);font-family:-apple-system,"SF Pro Text","Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif}
+.app{display:flex;direction:ltr;height:100%;height:100dvh}
+.main{flex:1;min-width:0;direction:rtl;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:20px}
+.top{display:flex;flex-direction:column;align-items:center;gap:10px}
+.brand{font-weight:800;letter-spacing:.4em;font-size:12px;color:var(--gold);direction:ltr}
+.chip{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:7px 15px;font-size:13px;color:var(--mut)}
+.led{width:9px;height:9px;border-radius:50%;background:#555}
+.chip.on .led{background:var(--rx);box-shadow:0 0 10px var(--rx)}
+.stage{position:relative;width:min(64vw,270px);aspect-ratio:1;display:grid;place-items:center;margin:14px 0}
+.ring{position:absolute;inset:-12px;border-radius:50%;border:2px solid transparent;pointer-events:none}
+.stage.tx .ring,.stage.rx .ring{animation:pulse 1.4s ease-out infinite}
+.stage.tx .ring{border-color:var(--tx)}.stage.rx .ring{border-color:var(--rx)}
+.stage .r2{animation-delay:.7s!important}
+@keyframes pulse{0%{transform:scale(.92);opacity:.9}100%{transform:scale(1.4);opacity:0}}
+#ptt{width:100%;height:100%;border-radius:50%;border:0;padding:0;font:inherit;font-weight:800;font-size:19px;line-height:1.5;color:#1b1303;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+background:radial-gradient(circle at 35% 25%,#ffe29a,var(--gold) 55%,#b87c0b);
+box-shadow:0 0 0 8px #ffffff10,0 0 0 9px var(--line),0 24px 50px #f2b53a40,inset 0 -10px 20px #0004,inset 0 8px 16px #fff6;transition:transform .12s,background .2s,box-shadow .2s}
+#ptt svg{display:block;margin:0 auto 6px;width:56px;height:56px}
+.stage.tx #ptt{transform:scale(.95);color:#fff;background:radial-gradient(circle at 35% 25%,#ff9a9b,var(--tx) 55%,#a31a1c);box-shadow:0 0 0 8px #ff4d4f30,0 0 60px #ff4d4f80,inset 0 -10px 20px #0005}
+.stage.rx #ptt{color:#042a1b;background:radial-gradient(circle at 35% 25%,#b3f7da,var(--rx) 55%,#17835c);box-shadow:0 0 0 8px #2fd49a30,0 0 60px #2fd49a80,inset 0 -10px 20px #0003}
+.stage.busy #ptt{filter:grayscale(.8) brightness(.7)}
+#ptt:disabled{opacity:.4}
+#st{min-height:24px;font-size:15px;color:var(--mut);text-align:center}
+.meter{width:min(64vw,270px);height:5px;background:var(--card);border-radius:9px;overflow:hidden}
+#lvl{height:100%;width:0;background:var(--gold);transition:width .08s}
+.side{width:350px;direction:rtl;display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line);transition:transform .3s}
+.side h2{margin:0;padding:18px 18px 12px;font-size:18px}
+.side h2 small{display:block;color:var(--gold);font-weight:500;font-size:12px;margin-top:3px}
+#list{flex:1;overflow-y:auto;margin:0;padding:4px 12px;list-style:none;-webkit-overflow-scrolling:touch}
+#list li{display:flex;gap:10px;align-items:center;padding:12px;margin:8px 0;background:var(--card);border:1px solid var(--line);border-radius:14px}
+.t{color:#1b1303;background:var(--gold);border-radius:8px;padding:3px 9px;font-size:12px;font-weight:700;direction:ltr;white-space:nowrap;flex:none}
+.tt{flex:1;word-break:break-word;font-size:15px}
+li.done .tt{text-decoration:line-through;color:var(--mut)}li.done .t{background:#59627a}
+.x{border:0;background:none;color:var(--mut);font-size:16px;padding:4px;cursor:pointer}
+.chk{width:19px;height:19px;accent-color:var(--gold);flex:none}
+li.empty{justify-content:center;color:var(--mut);border-style:dashed!important;background:none!important;padding:28px 8px}
+form.add{padding:12px 14px 16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.picker{position:relative;direction:ltr;display:flex;justify-content:center;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.picker::before{content:"";position:absolute;left:8px;right:8px;top:40px;height:40px;border-radius:10px;background:#f2b53a22;border:1px solid #f2b53a66;pointer-events:none}
+.picker::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(var(--card),#0000 35%,#0000 65%,var(--card))}
+.wheel{width:66px;height:120px;overflow-y:scroll;scroll-snap-type:y mandatory;scroll-padding-top:40px;padding:40px 0;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.wheel::-webkit-scrollbar{display:none}
+.wheel div{height:40px;line-height:40px;text-align:center;scroll-snap-align:start;font-size:19px;color:var(--mut);transition:color .15s,transform .15s}
+.wheel div.on{color:var(--ink);font-weight:700;transform:scale(1.14)}
+.colon{align-self:center;font-weight:700;color:var(--gold)}
+#txt{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;outline:none;width:100%}
+#txt:focus{border-color:var(--gold)}
+.btn{font:inherit;font-weight:700;border:0;border-radius:12px;background:var(--gold);color:#1b1303;padding:13px 16px;cursor:pointer}
+.tab{display:none}
+#gate{position:fixed;inset:0;z-index:50;background:#070a11f2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px}
+#gate p{color:var(--mut);margin:0;max-width:300px;line-height:1.8;font-size:14px}
+#nm{font:inherit;font-size:17px;text-align:center;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px;width:230px;outline:none}
+@media (max-width:700px){
+ .side{position:fixed;top:0;right:0;bottom:0;width:min(86vw,350px);z-index:20;transform:translateX(100%)}
+ .side.open{transform:none;box-shadow:-20px 0 50px #0009}
+ .tab{display:block;position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;z-index:30;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:9px 15px;font:inherit;font-size:14px}
+ .main{padding-top:calc(20px + env(safe-area-inset-top,0px))}
+}
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="brand">LIVE RADIO</div>
+  <input id="nm" placeholder="اكتب اسمك" maxlength="20">
+  <p>اضغط دخول لتفعيل الصوت والمايكروفون (مطلوب على الآيفون).</p>
+  <button class="btn" id="go" style="padding:14px 40px;font-size:17px">دخول 🎙️</button>
+</div>
+<button class="tab" id="tab">📋 المهام</button>
+<div class="app">
+  <div class="main">
+    <div class="top"><div class="brand">LIVE RADIO</div><div class="chip" id="chip"><span class="led"></span><span id="peers">جاري الاتصال…</span></div></div>
+    <div class="stage" id="stage"><span class="ring"></span><span class="ring r2"></span>
+      <button id="ptt" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" fill-opacity=".18"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/></svg><span id="lbl">اضغط واستمر</span></button>
+    </div>
+    <div class="meter"><div id="lvl"></div></div>
+    <div id="st">اضغط مطولاً، انتظر النغمة، ثم تكلم</div>
+  </div>
+  <aside class="side" id="side">
+    <h2>📋 جدول مهام اليوم<small id="dt"></small></h2>
+    <ul id="list"><li class="empty">لا توجد مهام بعد</li></ul>
+    <form class="add" id="f">
+      <div class="picker"><div class="wheel" id="wh"></div><span class="colon">:</span><div class="wheel" id="wm"></div><div class="wheel" id="wp"></div></div>
+      <input id="txt" placeholder="اكتب المهمة…" maxlength="120" required>
+      <button class="btn" type="submit">إضافة مهمة</button>
+    </form>
+  </aside>
+</div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)},pad=function(n){return String(n).padStart(2,"0")};
+var SR=16000;
+try{$("dt").textContent=new Date().toLocaleDateString("ar-SA",{weekday:"long",day:"numeric",month:"long"})}catch(e){}
+$("tab").onclick=function(){var s=$("side").classList.toggle("open");$("tab").textContent=s?"✕ إغلاق":"📋 المهام"};
+
+/* ---------- wheel picker ---------- */
+function wheel(el,items,init){
+  el.innerHTML="";items.forEach(function(t){var d=document.createElement("div");d.textContent=t;el.appendChild(d)});
+  var k=el.children,last=-1,raf=0;
+  function mark(){var i=Math.max(0,Math.min(k.length-1,Math.round(el.scrollTop/40)));if(i!==last){if(k[last])k[last].classList.remove("on");k[i].classList.add("on");last=i}}
+  el.addEventListener("scroll",function(){cancelAnimationFrame(raf);raf=requestAnimationFrame(mark)},{passive:true});
+  el.scrollTop=init*40;mark();
+  return function(){return Math.max(0,Math.min(k.length-1,Math.round(el.scrollTop/40)))};
+}
+var hrs=[],mins=[],i;for(i=1;i<=12;i++)hrs.push(i);for(i=0;i<60;i++)mins.push(pad(i));
+var n0=new Date(),gH,gM,gP;
+function initW(){gH=wheel($("wh"),hrs,(n0.getHours()%12||12)-1);gM=wheel($("wm"),mins,n0.getMinutes());gP=wheel($("wp"),["ص","م"],n0.getHours()>=12?1:0)}
+initW();setTimeout(initW,80);
+function picked(){var h=gH()+1,pm=gP()===1;return pad((h%12)+(pm?12:0))+":"+mins[gM()]}
+function fmt(t){var p=(t||"00:00").split(":"),h=+p[0];return (h%12||12)+":"+p[1]+" "+(h>=12?"م":"ص")}
+
+/* ---------- websocket ---------- */
+var ws=null,connected=false,myName="",list=$("list"),st=$("st"),stage=$("stage"),lbl=$("lbl"),ptt=$("ptt");
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+function renderTasks(ts){
+  list.textContent="";
+  if(!ts.length){var e=document.createElement("li");e.className="empty";e.textContent="لا توجد مهام بعد";list.appendChild(e);return}
+  ts.slice().sort(function(a,b){return a.time.localeCompare(b.time)}).forEach(function(t){
+    var li=document.createElement("li");if(t.done)li.className="done";
+    var cb=document.createElement("input");cb.type="checkbox";cb.className="chk";cb.checked=t.done;cb.onchange=function(){send({t:"toggle",id:t.id})};
+    var tm=document.createElement("span");tm.className="t";tm.textContent=fmt(t.time);
+    var tx=document.createElement("span");tx.className="tt";tx.textContent=t.text;
+    var x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.onclick=function(){send({t:"del",id:t.id})};
+    li.append(cb,tm,tx,x);list.appendChild(li);
+  });
+}
+$("f").addEventListener("submit",function(e){e.preventDefault();var v=$("txt").value.trim();if(!v)return;send({t:"add",time:picked(),text:v});$("txt").value=""});
+
+var retry=0;
+function connect(){
+  ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
+  ws.binaryType="arraybuffer";
+  ws.onopen=function(){connected=true;retry=0;ptt.disabled=false;send({t:"hello",name:myName});$("chip").classList.add("on")};
+  ws.onclose=function(){connected=false;ptt.disabled=true;$("chip").classList.remove("on");$("peers").textContent="انقطع الاتصال… إعادة المحاولة";stopTalking(true);setTimeout(connect,Math.min(5000,500+retry++*700))};
+  ws.onmessage=function(ev){
+    if(typeof ev.data!=="string"){playChunk(ev.data);return}
+    var m;try{m=JSON.parse(ev.data)}catch(e){return}
+    if(m.t==="tasks")renderTasks(m.tasks);
+    else if(m.t==="peers")$("peers").textContent="المتصلون الآن: "+m.n;
+    else if(m.t==="talk")m.on?rxStart(m.name):rxEnd();
+    else if(m.t==="grant")onGrant();
+    else if(m.t==="busy"){holding=false;wantTalk=false;st.textContent="القناة مشغولة، انتظر";stage.classList.add("busy");setTimeout(function(){stage.classList.remove("busy");st.textContent="جاهز"},1200)}
+    else if(m.t==="timeout")stopTalking(false);
+  };
+}
+
+/* ---------- audio ---------- */
+var AC=window.AudioContext||window.webkitAudioContext,ctx=null,stream=null,proc=null,sending=false,playHead=0;
+function ensure(){if(!ctx&&AC)ctx=new AC();if(ctx&&ctx.state!=="running")ctx.resume();return ctx}
+function tone(at){ // two-tone radio alert, 1.5s
+  var g=ctx.createGain(),f=ctx.createBiquadFilter(),o=ctx.createOscillator(),o2=ctx.createOscillator();
+  f.type="lowpass";f.frequency.value=2600;o.type="triangle";o2.type="sine";
+  o.connect(g);o2.connect(g);g.connect(f);f.connect(ctx.destination);
+  for(var i=0;i<6;i++){var fr=i%2?740:1046;o.frequency.setValueAtTime(fr,at+i*.25);o2.frequency.setValueAtTime(fr*2,at+i*.25)}
+  g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(.2,at+.04);g.gain.setValueAtTime(.2,at+1.4);g.gain.linearRampToValueAtTime(0,at+1.5);
+  o.start(at);o2.start(at);o.stop(at+1.55);o2.stop(at+1.55);return [o,o2];
+}
+function endBeep(at){var o=ctx.createOscillator(),g=ctx.createGain();o.type="sine";o.frequency.value=1500;o.connect(g);g.connect(ctx.destination);g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(.18,at+.01);g.gain.linearRampToValueAtTime(0,at+.14);o.start(at);o.stop(at+.16)}
+function openMic(){
+  if(stream)return Promise.resolve();
+  return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}}).then(function(s){
+    stream=s;s.getAudioTracks().forEach(function(t){t.enabled=false});
+    var src=ctx.createMediaStreamSource(s);proc=ctx.createScriptProcessor(2048,1,1);
+    var mute=ctx.createGain();mute.gain.value=0;src.connect(proc);proc.connect(mute);mute.connect(ctx.destination);
+    var ratio=ctx.sampleRate/SR;
+    proc.onaudioprocess=function(e){
+      if(!sending||!ws||ws.readyState!==1)return;
+      var inp=e.inputBuffer.getChannelData(0),n=Math.floor(inp.length/ratio),out=new Int16Array(n),peak=0;
+      for(var i=0;i<n;i++){var a=Math.floor(i*ratio),b=Math.max(a+1,Math.floor((i+1)*ratio)),s=0,c=0;for(var j=a;j<b&&j<inp.length;j++){s+=inp[j];c++}
+        var v=c?s/c:0;if(v>1)v=1;if(v<-1)v=-1;out[i]=v*32767;var av=Math.abs(v);if(av>peak)peak=av}
+      ws.send(out.buffer);$("lvl").style.width=Math.min(100,peak*160)+"%";
+    };
+  });
+}
+function playChunk(ab){
+  if(!ctx||!rxOn)return;
+  var i16=new Int16Array(ab),n=i16.length;if(!n)return;
+  var buf=ctx.createBuffer(1,n,SR),ch=buf.getChannelData(0);for(var i=0;i<n;i++)ch[i]=i16[i]/32768;
+  var src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);
+  var now=ctx.currentTime;if(playHead<now+.03)playHead=now+.14; // jitter buffer
+  src.start(playHead);playHead+=buf.duration;
+  $("lvl").style.width="55%";
+}
+var rxOn=false;
+function rxStart(name){
+  if(!ensure())return;
+  rxOn=true;tone(ctx.currentTime+.02);playHead=ctx.currentTime+1.55;
+  stage.classList.add("rx");lbl.textContent="استقبال";st.textContent="🔊 "+(name||"شخص")+" يتحدث";
+}
+function rxEnd(){
+  if(!ctx)return;rxOn=false;var wait=Math.max(0,playHead-ctx.currentTime);
+  endBeep(playHead+.05);
+  setTimeout(function(){if(!rxOn){stage.classList.remove("rx");lbl.textContent="اضغط واستمر";st.textContent="جاهز";$("lvl").style.width="0"}},wait*1000+250);
+}
+
+/* ---------- push to talk ---------- */
+var holding=false,wantTalk=false,seq=0,tOsc=null;
+function down(e){
+  e.preventDefault();
+  if(holding||!connected||rxOn||!ensure())return;
+  holding=true;wantTalk=true;
+  stage.classList.add("tx");lbl.textContent="جاري الفتح…";st.textContent="📡 انتظر النغمة…";
+  openMic().then(function(){send({t:"start"})}).catch(function(){holding=false;wantTalk=false;stage.classList.remove("tx");lbl.textContent="اضغط واستمر";st.textContent="لم يُسمح باستخدام المايكروفون"});
+}
+function onGrant(){
+  if(!wantTalk){send({t:"end"});return}
+  var my=++seq;tOsc=tone(ctx.currentTime+.02);
+  setTimeout(function(){
+    if(!holding||my!==seq)return;
+    stream.getAudioTracks().forEach(function(t){t.enabled=true});sending=true;
+    lbl.textContent="تكلّم الآن";st.textContent="🔴 تتكلم الآن… ارفع إصبعك للإرسال";
+  },1500);
+}
+function stopTalking(silent){
+  var was=holding;holding=false;wantTalk=false;seq++;
+  var wasSending=sending;sending=false;
+  if(stream)stream.getAudioTracks().forEach(function(t){t.enabled=false});
+  stage.classList.remove("tx");lbl.textContent="اضغط واستمر";$("lvl").style.width="0";
+  if(!was)return;
+  if(tOsc&&!wasSending){tOsc.forEach(function(o){try{o.stop()}catch(e){}})}
+  if(wasSending&&ctx)endBeep(ctx.currentTime+.02);
+  if(!silent){send({t:"end"});st.textContent=wasSending?"✅ تم الإرسال":"اضغط مطولاً، انتظر النغمة، ثم تكلم"}
+}
+ptt.addEventListener("pointerdown",down);
+["pointerup","pointercancel"].forEach(function(n){ptt.addEventListener(n,function(){stopTalking(false)});window.addEventListener(n,function(){if(holding)stopTalking(false)})});
+ptt.addEventListener("contextmenu",function(e){e.preventDefault()});
+
+/* ---------- start ---------- */
+$("go").onclick=function(){
+  myName=$("nm").value.trim()||"مجهول";ensure();$("gate").style.display="none";
+  connect();
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)openMic().catch(function(){st.textContent="لم يُسمح بالمايكروفون — تقدر تسمع فقط"});
+};
+document.addEventListener("visibilitychange",function(){if(!document.hidden&&ctx&&ctx.state!=="running")ctx.resume()});
+})();
+</script>
+</body>
+</html>
