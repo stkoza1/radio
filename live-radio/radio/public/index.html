@@ -2,6 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
+<meta name="ws-proof" content="{{NONCE}}">
 <title>لاسلكي · جدول مهام اليوم</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a0d14">
@@ -128,20 +129,22 @@ function renderTasks(ts){
   if(!ts.length){var e=document.createElement("li");e.className="empty";e.textContent="لا توجد مهام بعد";list.appendChild(e);return}
   ts.slice().sort(function(a,b){return a.time.localeCompare(b.time)}).forEach(function(t){
     var li=document.createElement("li");if(t.done)li.className="done";
-    var cb=document.createElement("input");cb.type="checkbox";cb.className="chk";cb.checked=t.done;cb.onchange=function(){send({t:"toggle",id:t.id})};
+    var cb=document.createElement("input");cb.type="checkbox";cb.className="chk";cb.checked=t.done;
+    if(t.mine===false)cb.disabled=true;else cb.onchange=function(){send({t:"toggle",id:t.id})};
     var tm=document.createElement("span");tm.className="t";tm.textContent=fmt(t.time);
     var tx=document.createElement("span");tx.className="tt";tx.textContent=t.text;
-    var x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.onclick=function(){send({t:"del",id:t.id})};
-    li.append(cb,tm,tx,x);list.appendChild(li);
+    li.append(cb,tm,tx);
+    if(t.mine!==false){var x=document.createElement("button");x.className="x";x.type="button";x.textContent="✕";x.onclick=function(){send({t:"del",id:t.id})};li.append(x)}
+    list.appendChild(li);
   });
 }
 $("f").addEventListener("submit",function(e){e.preventDefault();var v=$("txt").value.trim();if(!v)return;send({t:"add",time:picked(),text:v});$("txt").value=""});
 
-var retry=0;
+var retry=0,proof=(document.querySelector('meta[name="ws-proof"]')||{}).content||"";
 function connect(){
   ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
   ws.binaryType="arraybuffer";
-  ws.onopen=function(){connected=true;retry=0;ptt.disabled=false;send({t:"hello",name:myName});$("chip").classList.add("on")};
+  ws.onopen=function(){connected=true;retry=0;ptt.disabled=false;send({t:"hello",name:myName,proof:proof});$("chip").classList.add("on")};
   ws.onclose=function(){connected=false;ptt.disabled=true;$("chip").classList.remove("on");$("peers").textContent="انقطع الاتصال… إعادة المحاولة";stopTalking(true);setTimeout(connect,Math.min(5000,500+retry++*700))};
   ws.onmessage=function(ev){
     if(typeof ev.data!=="string"){playChunk(ev.data);return}
@@ -152,6 +155,7 @@ function connect(){
     else if(m.t==="grant")onGrant();
     else if(m.t==="busy"){holding=false;wantTalk=false;st.textContent="القناة مشغولة، انتظر";stage.classList.add("busy");setTimeout(function(){stage.classList.remove("busy");st.textContent="جاهز"},1200)}
     else if(m.t==="timeout")stopTalking(false);
+    else if(m.t==="full")st.textContent="قائمة المهام ممتلئة";
   };
 }
 
