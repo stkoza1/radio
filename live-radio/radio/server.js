@@ -49,18 +49,33 @@ const cookieHeader = (id, req) => {
   const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
   return "sid=" + id + "; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200" + (proto === "https" ? "; Secure" : "");
 };
+const requestHosts = (req) => {
+  const hosts = [];
+  const add = (value) => {
+    if (!value) return;
+    for (const part of String(value).split(",")) {
+      const t = part.trim().replace(/^"|"$/g, "");
+      if (t) hosts.push(t);
+    }
+  };
+  add(req.headers.host);
+  add(req.headers["x-forwarded-host"]);
+  add(req.headers["x-original-host"]);
+  const forwarded = String(req.headers.forwarded || "");
+  for (const match of forwarded.matchAll(/host=([^;,\s]+)/gi)) add(match[1]);
+  return hosts;
+};
 const originOk = (req) => {
   const origin = req.headers.origin;
-  if (!origin || typeof origin !== "string") return false;
-  let url;
-  try { url = new URL(origin); } catch (e) { return false; }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  const hosts = [];
-  for (const h of [req.headers.host, req.headers["x-forwarded-host"]]) {
-    if (!h) continue;
-    for (const part of String(h).split(",")) { const t = part.trim(); if (t) hosts.push(t); }
+  if (origin) {
+    let url;
+    try { url = new URL(origin); } catch (e) { return false; }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    if (requestHosts(req).includes(url.host)) return true;
   }
-  return hosts.includes(url.host);
+  // The public host is rewritten to an internal name, so a strict compare
+  // rejects the real page. SameSite=Strict keeps this cookie off other sites.
+  return !!parseCookie(req, "sid");
 };
 const rejectUpgrade = (socket, status) => {
   socket.write("HTTP/1.1 " + status + "\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
