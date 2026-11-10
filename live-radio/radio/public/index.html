@@ -123,7 +123,21 @@ function fmt(t){var p=(t||"00:00").split(":"),h=+p[0];return (h%12||12)+":"+p[1]
 
 /* ---------- websocket ---------- */
 var ws=null,connected=false,myName="",list=$("list"),st=$("st"),stage=$("stage"),lbl=$("lbl"),ptt=$("ptt");
-function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+var httpMode=false;
+function send(o){
+  if(httpMode){fetch("/in",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)}).catch(function(){});return}
+  if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));
+}
+function applyMsg(m){
+  if(m.t==="tasks")renderTasks(m.tasks);
+  else if(m.t==="peers")$("peers").textContent="المتصلون الآن: "+m.n;
+  else if(m.t==="talk")m.on?rxStart(m.name):rxEnd();
+  else if(m.t==="grant")onGrant();
+  else if(m.t==="busy"){holding=false;wantTalk=false;st.textContent="القناة مشغولة، انتظر";stage.classList.add("busy");setTimeout(function(){stage.classList.remove("busy");st.textContent="جاهز"},1200)}
+  else if(m.t==="timeout")stopTalking(false);
+  else if(m.t==="full")st.textContent="قائمة المهام ممتلئة";
+  else if(m.t==="audio"&&m.b64){try{var bin=Uint8Array.from(atob(m.b64),function(ch){return ch.charCodeAt(0)});playChunk(bin.buffer)}catch(e){}}
+}
 function renderTasks(ts){
   list.textContent="";
   if(!ts.length){var e=document.createElement("li");e.className="empty";e.textContent="لا توجد مهام بعد";list.appendChild(e);return}
@@ -140,22 +154,56 @@ function renderTasks(ts){
 }
 $("f").addEventListener("submit",function(e){e.preventDefault();var v=$("txt").value.trim();if(!v)return;send({t:"add",time:picked(),text:v});$("txt").value=""});
 
-var retry=0,proof=(document.querySelector('meta[name="ws-proof"]')||{}).content||"";
+var retry=0,proof=(document.querySelector('meta[name="ws-proof"]')||{}).content||"",pollOn=false;
+function httpStart(){
+  if(httpMode)return;
+  httpMode=true;
+  try{if(ws)ws.close()}catch(e){}
+  connected=true;retry=0;ptt.disabled=false;$("chip").classList.add("on");
+  $("peers").textContent="جاري الاتصال…";
+  fetch("/in",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:"hello",name:myName,proof:proof})}).then(function(r){
+    if(!r.ok)throw new Error(String(r.status));
+    if(!pollOn){pollOn=true;poll()}
+  }).catch(function(){
+    httpMode=false;pollOn=false;
+    $("peers").textContent="انقطع الاتصال… إعادة المحاولة";
+    setTimeout(httpStart,1000);
+  });
+}
+function poll(){
+  if(!httpMode)return;
+  fetch("/poll",{credentials:"same-origin",cache:"no-store"}).then(function(r){
+    if(!r.ok)throw new Error(String(r.status));
+    return r.json();
+  }).then(function(data){
+    if(data.peers!=null)$("peers").textContent="المتصلون الآن: "+data.peers;
+    (data.events||[]).forEach(applyMsg);
+    $("chip").classList.add("on");
+    setTimeout(poll,120);
+  }).catch(function(){
+    $("chip").classList.remove("on");
+    $("peers").textContent="انقطع الاتصال… إعادة المحاولة";
+    setTimeout(poll,1000);
+  });
+}
 function connect(){
-  ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
+  if(httpMode){httpStart();return}
+  var got=false;
+  try{ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host)}catch(e){httpStart();return}
   ws.binaryType="arraybuffer";
+  var timer=setTimeout(function(){if(!got)httpStart()},2000);
   ws.onopen=function(){connected=true;retry=0;ptt.disabled=false;send({t:"hello",name:myName,proof:proof});$("chip").classList.add("on")};
-  ws.onclose=function(){connected=false;ptt.disabled=true;$("chip").classList.remove("on");$("peers").textContent="انقطع الاتصال… إعادة المحاولة";stopTalking(true);setTimeout(connect,Math.min(5000,500+retry++*700))};
+  ws.onerror=function(){if(!got)httpStart()};
+  ws.onclose=function(){
+    if(!got){clearTimeout(timer);httpStart();return}
+    if(httpMode)return;
+    connected=false;ptt.disabled=true;$("chip").classList.remove("on");$("peers").textContent="انقطع الاتصال… إعادة المحاولة";stopTalking(true);setTimeout(connect,Math.min(5000,500+retry++*700));
+  };
   ws.onmessage=function(ev){
+    got=true;clearTimeout(timer);
     if(typeof ev.data!=="string"){playChunk(ev.data);return}
     var m;try{m=JSON.parse(ev.data)}catch(e){return}
-    if(m.t==="tasks")renderTasks(m.tasks);
-    else if(m.t==="peers")$("peers").textContent="المتصلون الآن: "+m.n;
-    else if(m.t==="talk")m.on?rxStart(m.name):rxEnd();
-    else if(m.t==="grant")onGrant();
-    else if(m.t==="busy"){holding=false;wantTalk=false;st.textContent="القناة مشغولة، انتظر";stage.classList.add("busy");setTimeout(function(){stage.classList.remove("busy");st.textContent="جاهز"},1200)}
-    else if(m.t==="timeout")stopTalking(false);
-    else if(m.t==="full")st.textContent="قائمة المهام ممتلئة";
+    applyMsg(m);
   };
 }
 
@@ -179,11 +227,13 @@ function openMic(){
     var mute=ctx.createGain();mute.gain.value=0;src.connect(proc);proc.connect(mute);mute.connect(ctx.destination);
     var ratio=ctx.sampleRate/SR;
     proc.onaudioprocess=function(e){
-      if(!sending||!ws||ws.readyState!==1)return;
+      if(!sending||(!httpMode&&(!ws||ws.readyState!==1)))return;
       var inp=e.inputBuffer.getChannelData(0),n=Math.floor(inp.length/ratio),out=new Int16Array(n),peak=0;
       for(var i=0;i<n;i++){var a=Math.floor(i*ratio),b=Math.max(a+1,Math.floor((i+1)*ratio)),s=0,c=0;for(var j=a;j<b&&j<inp.length;j++){s+=inp[j];c++}
         var v=c?s/c:0;if(v>1)v=1;if(v<-1)v=-1;out[i]=v*32767;var av=Math.abs(v);if(av>peak)peak=av}
-      ws.send(out.buffer);$("lvl").style.width=Math.min(100,peak*160)+"%";
+      if(httpMode)fetch("/in",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/octet-stream"},body:out.buffer}).catch(function(){});
+      else ws.send(out.buffer);
+      $("lvl").style.width=Math.min(100,peak*160)+"%";
     };
   });
 }

@@ -68,10 +68,20 @@ const rejectUpgrade = (socket, status) => {
 };
 
 // ---------- http ----------
+const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
+const readBody = (req, limit) => new Promise((resolve, reject) => {
+  const chunks = [];
+  let size = 0;
+  req.on("data", c => { size += c.length; if (size > limit) { reject(new Error("big")); req.destroy(); return; } chunks.push(c); });
+  req.on("end", () => resolve(Buffer.concat(chunks)));
+  req.on("error", reject);
+});
 const server = http.createServer((req, res) => {
   const pathOnly = (req.url || "/").split("?")[0];
   if (pathOnly === "/health") { res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }); res.end("ok"); return; }
-  if (pathOnly !== "/") { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }); res.end("not found"); return; }
+  if (pathOnly === "/poll") { handlePoll(req, res); return; }
+  if (pathOnly === "/in") { handleIn(req, res); return; }
+  if (pathOnly !== "/" || req.method !== "GET") { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }); res.end("not found"); return; }
   fs.readFile(path.join(__dirname, "public", "index.html"), (err, data) => {
     if (err) { res.writeHead(500); res.end("error"); return; }
     const sid = ensureSession(req);
@@ -87,7 +97,33 @@ const server = http.createServer((req, res) => {
 
 // ---------- minimal websocket (RFC 6455) ----------
 const clients = new Set();
+const httpClients = new Map();
 let talker = null, talkTimer = null;
+const onlineCount = () => {
+  const now = Date.now();
+  let n = clients.size;
+  for (const c of httpClients.values()) if (c.seen > now - 20000) n++;
+  return n;
+};
+function enqueue(c, obj) {
+  if (obj.t === "audio" && c.queue.some(e => e.t === "audio")) {
+    const audios = c.queue.filter(e => e.t === "audio").length;
+    if (audios >= 8) return;
+  }
+  c.queue.push(obj);
+  if (c.queue.length > 40) c.queue.splice(0, c.queue.length - 40);
+  flush(c);
+}
+function flush(c) {
+  if (!c.res || !c.queue.length) return;
+  const res = c.res;
+  c.res = null;
+  clearTimeout(c.timer);
+  const events = c.queue.splice(0);
+  res.writeHead(200, JSON_HEADERS);
+  res.end(JSON.stringify({ events, peers: onlineCount() }));
+}
+function reply(c, obj) { if (c.http) enqueue(c, obj); else sendJSON(c, obj); }
 
 function frame(op, payload) {
   const len = payload.length;
@@ -99,7 +135,17 @@ function frame(op, payload) {
 }
 const sendRaw = (c, buf) => { if (!c.socket.destroyed) c.socket.write(buf); };
 const sendJSON = (c, o) => sendRaw(c, frame(1, Buffer.from(JSON.stringify(o))));
-const bcast = (o, except) => { const f = frame(1, Buffer.from(JSON.stringify(o))); clients.forEach(c => { if (c !== except) sendRaw(c, f); }); };
+const bcast = (o, except) => {
+  clients.forEach(c => { if (c !== except) sendJSON(c, o); });
+  httpClients.forEach(c => { if (c !== except && c.authed) enqueue(c, o); });
+};
+function bcastAudio(except, buf) {
+  const f = frame(2, buf);
+  clients.forEach(c => { if (c !== except) sendRaw(c, f); });
+  const b64 = buf.toString("base64");
+  httpClients.forEach(c => { if (c !== except && c.authed) enqueue(c, { t: "audio", b64 }); });
+}
+function bcastPeers() { bcast({ t: "peers", n: onlineCount() }); }
 
 function endTalk(c) {
   if (talker !== c) return;
@@ -109,7 +155,7 @@ function endTalk(c) {
 
 function onMessage(c, op, data) {
   if (op === 2) {
-    if (c.authed && c === talker) { const f = frame(2, data); clients.forEach(o => { if (o !== c) sendRaw(o, f); }); }
+    if (c.authed && c === talker) bcastAudio(c, data);
     return;
   }
   if (op !== 1) return;
@@ -120,21 +166,22 @@ function onMessage(c, op, data) {
     if (!row || typeof m.proof !== "string" || m.proof.length > 64 || m.proof !== row.proof) { c.drop(); return; }
     c.authed = true;
     c.name = String(m.name || "مجهول").slice(0, 20);
+    if (c.http) { enqueue(c, { t: "tasks", tasks: tasksFor(c) }); bcastPeers(); }
     return;
   }
   if (!c.authed) return;
   switch (m.t) {
     case "start":
-      if (talker && talker !== c) { sendJSON(c, { t: "busy" }); break; }
-      talker = c; sendJSON(c, { t: "grant" });
+      if (talker && talker !== c) { reply(c, { t: "busy" }); break; }
+      talker = c; reply(c, { t: "grant" });
       bcast({ t: "talk", on: true, name: c.name || "مجهول" }, c);
-      clearTimeout(talkTimer); talkTimer = setTimeout(() => { sendJSON(c, { t: "timeout" }); endTalk(c); }, 40000);
+      clearTimeout(talkTimer); talkTimer = setTimeout(() => { reply(c, { t: "timeout" }); endTalk(c); }, 40000);
       break;
     case "end": endTalk(c); break;
     case "add": {
       const text = String(m.text || "").trim().slice(0, 120), time = /^\d\d:\d\d$/.test(m.time) ? m.time : "00:00";
       if (!text) break;
-      if (todays().length >= MAX_TASKS) { sendJSON(c, { t: "full" }); break; }
+      if (todays().length >= MAX_TASKS) { reply(c, { t: "full" }); break; }
       tasks.push({ id: crypto.randomBytes(5).toString("hex"), time, text, date: day(), done: false, owner: c.sid }); save();
       bcastTasks(); break;
     }
@@ -157,6 +204,59 @@ function tasksFor(c) {
 }
 function bcastTasks() {
   clients.forEach(c => sendJSON(c, { t: "tasks", tasks: tasksFor(c) }));
+  httpClients.forEach(c => { if (c.authed) enqueue(c, { t: "tasks", tasks: tasksFor(c) }); });
+}
+function sessionRow(req) {
+  const sid = parseCookie(req, "sid");
+  const row = sessions.get(sid);
+  if (!row || row.exp < Date.now()) return null;
+  row.exp = Date.now() + SESSION_MS;
+  return { sid, row };
+}
+function handlePoll(req, res) {
+  if (req.method !== "GET" || !originOk(req)) { res.writeHead(403); res.end(); return; }
+  const found = sessionRow(req);
+  const c = found && httpClients.get(found.sid);
+  if (!found || !c || !c.authed) { res.writeHead(401); res.end(); return; }
+  c.seen = Date.now();
+  if (c.res) { const old = c.res; c.res = null; clearTimeout(c.timer); try { old.writeHead(204); old.end(); } catch (e) {} }
+  c.res = res;
+  if (c.queue.length) { flush(c); return; }
+  c.timer = setTimeout(() => {
+    if (c.res !== res) return;
+    c.res = null;
+    res.writeHead(200, JSON_HEADERS);
+    res.end(JSON.stringify({ events: [], peers: onlineCount() }));
+  }, 3000);
+  req.on("close", () => { if (c.res === res) { c.res = null; clearTimeout(c.timer); } });
+}
+function handleIn(req, res) {
+  if (req.method !== "POST" || !originOk(req)) { res.writeHead(403); res.end(); return; }
+  const found = sessionRow(req);
+  if (!found) { res.writeHead(401); res.end(); return; }
+  readBody(req, 65536).then(body => {
+    const type = String(req.headers["content-type"] || "");
+    if (type.startsWith("application/octet-stream")) {
+      const c = httpClients.get(found.sid);
+      if (c && c.authed && talker === c && body.length && body.length <= MAX_FRAME) bcastAudio(c, body);
+      res.writeHead(204); res.end();
+      return;
+    }
+    let m; try { m = JSON.parse(body.toString()); } catch (e) { res.writeHead(400); res.end(); return; }
+    const existing = httpClients.get(found.sid);
+    if (!m || typeof m.t !== "string" || (m.t !== "hello" && !(existing && existing.authed))) { res.writeHead(401); res.end(); return; }
+    while (httpClients.size >= 300) {
+      const oldest = [...httpClients.values()].sort((a, b) => a.seen - b.seen)[0];
+      if (!oldest) break;
+      httpClients.delete(oldest.sid);
+    }
+    const c = httpClients.get(found.sid) || { sid: found.sid, name: "مجهول", authed: false, http: true, queue: [], res: null, timer: null, seen: Date.now(), drop() { httpClients.delete(this.sid); if (talker === this) endTalk(this); } };
+    c.seen = Date.now();
+    c.http = true;
+    httpClients.set(found.sid, c);
+    onMessage(c, 1, Buffer.from(JSON.stringify(m)));
+    if (!res.headersSent) { res.writeHead(c.authed || m.t !== "hello" ? 204 : 401); res.end(); }
+  }).catch(() => { if (!res.headersSent) { res.writeHead(413); res.end(); } });
 }
 
 server.on("upgrade", (req, socket) => {
@@ -171,12 +271,12 @@ server.on("upgrade", (req, socket) => {
   const c = { socket, name: "مجهول", sid, authed: false, drop: () => {} };
   clients.add(c);
   sendJSON(c, { t: "tasks", tasks: tasksFor(c) });
-  bcast({ t: "peers", n: clients.size });
+  bcastPeers();
   let buf = Buffer.alloc(0), partial = null;
 
   const close = () => {
     if (!clients.delete(c)) return;
-    endTalk(c); bcast({ t: "peers", n: clients.size }); socket.destroy();
+    endTalk(c); bcastPeers(); socket.destroy();
   };
   c.drop = close;
   socket.on("data", chunk => {
@@ -219,5 +319,9 @@ server.on("upgrade", (req, socket) => {
   socket.on("close", close); socket.on("error", close);
 });
 
-setInterval(() => clients.forEach(c => { try { sendRaw(c, frame(9, Buffer.alloc(0))); } catch (e) {} }), 25000);
+setInterval(() => {
+  clients.forEach(c => { try { sendRaw(c, frame(9, Buffer.alloc(0))); } catch (e) {} });
+  const now = Date.now();
+  for (const [sid, c] of httpClients) if (c.seen < now - 60000) { if (talker === c) endTalk(c); httpClients.delete(sid); }
+}, 25000);
 server.listen(PORT, () => console.log("Live Radio running on port " + PORT));
